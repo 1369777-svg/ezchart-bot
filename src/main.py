@@ -3,6 +3,7 @@ EZChart — application entry point.
 
 Wires up:
 - Settings and logging
+- Health-check HTTP server (for Render free Web Service)
 - Telegram bot + dispatcher
 - i18n (Fluent, ru/en/it)
 - Handlers (commands, language, screenshot)
@@ -12,6 +13,7 @@ Run: python -m src.main
 """
 
 import asyncio
+import os
 import sys
 
 from aiogram import Bot, Dispatcher
@@ -62,6 +64,29 @@ def build_dispatcher() -> Dispatcher:
     return dp
 
 
+async def run_health_server(port: int) -> None:
+    """
+    Minimal HTTP server for Render's health checks.
+
+    Responds with "OK" on GET / and GET /health.
+    Render uses this to keep the Web Service awake.
+    """
+    from aiohttp import web
+
+    async def health(_request: web.Request) -> web.Response:
+        return web.Response(text="OK")
+
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    await site.start()
+    log.info("health_server_started", port=port)
+
+
 async def main() -> None:
     setup_logging()
     log.info(
@@ -70,6 +95,10 @@ async def main() -> None:
         log_level=settings.log_level,
         rate_limit_sec=settings.rate_limit_sec,
     )
+
+    # Start health-check server (for Render free Web Service)
+    port = int(os.environ.get("PORT", 8080))
+    await run_health_server(port)
 
     bot = Bot(
         token=settings.telegram_token,
